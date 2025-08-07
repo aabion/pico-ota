@@ -1,26 +1,40 @@
 # main.py - Script avanzado para Pico W con ADS1115, validación estadística y autocalibración
-
 import machine
 import time
 import ujson
 import math
 import urequests
-from umqtt.simple import MQTTClient
+import network
+from simple import MQTTClient
 from ads1x15 import ADS1115 # Driver que hemos subido
+from ota_updater import OTAUpdater # NUEVO: Importamos la librería de actualización
 
 # --- CONFIGURACIÓN ESPECÍFICA DE ESTE PICO ---
 PICO_ID = "1" # ¡¡CAMBIAR PARA CADA PICO!! "1", "2", "3", etc.
 
 # --- CONFIGURACIÓN GENERAL ---
-WIFI_SSID = "TuNombreDeRedWiFi"
-WIFI_PASS = "TuContraseñaWiFi"
-MQTT_BROKER = "192.168.1.100" # IP de la Raspberry Pi 5
+WIFI_SSID = "AMBE"
+WIFI_PASS = "Ganuza210966"
+MQTT_BROKER = "192.168.68.107" # IP de la Raspberry Pi 5
 CONFIG_FILE = "config.json"
-MAIN_LOOP_INTERVAL_S = 300 # 300s = 5 minutos
+MAIN_LOOP_INTERVAL_S = 60 # 300 seg.=5 minutos / pongo 60 seg=1 minu
+
+# --- NUEVO: Temas MQTT ---
+TOPIC_DATA = f"planta/{PICO_ID}/data"
+TOPIC_RIEGO = f"planta/{PICO_ID}/riego"
+TOPIC_ADMIN = f"planta/{PICO_ID}/admin" # NUEVO: Tema para comandos administrativos
 
 # --- CONFIGURACIÓN DE TELEGRAM ---
-TELEGRAM_BOT_TOKEN = "TOKEN_DE_TU_BOT" # Pega aquí tu Token
-TELEGRAM_CHAT_ID = "ID_DE_TU_CHAT"     # Pega aquí tu Chat ID
+TELEGRAM_BOT_TOKEN = "8290589551:AAFO0Ya0Xj_PERXtNHLgoDeZEoLwFRip47A"
+TELEGRAM_CHAT_ID = "1413941022"
+
+# --- NUEVO: CONFIGURACIÓN OTA DESDE GITHUB ---
+# Reemplaza 'tu-usuario' y 'tu-repositorio' con los tuyos
+#GITHUB_REPO_URL = "https://api.github.com/repos/tu-usuario/tu-repositorio/contents/"
+GITHUB_REPO_URL = "https://github.com/aabion/pico-ota"
+
+# Lista de ficheros que el actualizador OTA debe gestionar
+OTA_FILES = ['main.py', 'ads1x15.py'] 
 
 # --- CONFIGURACIÓN DEL SENSOR ADS1115 ---
 I2C_BUS = 0
@@ -36,7 +50,80 @@ ads = ADS1115(i2c, gain=ADS_GAIN)
 config_data = {}
 telegram_last_update_id = 0
 
-# --- FUNCIONES AUXILIARES ---
+# --- NUEVAS FUNCIONES Y FUNCIONES MODIFICADAS ---
+
+def get_telegram_updates_and_check_command():
+    """Obtiene el último mensaje de Telegram y comprueba si es un comando de actualización para este Pico."""
+    global telegram_last_update_id
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset={telegram_last_update_id + 1}&limit=1"
+    
+    try:
+        response = urequests.get(url, timeout=10)
+        data = response.json()
+        response.close()
+
+        if data['ok'] and data['result']:
+            update = data['result'][0]
+            telegram_last_update_id = update['update_id']
+            message_text = update['message']['text'].upper() # Convertir a mayúsculas
+
+            # Parsear el comando, ej: "ACTUALIZAR 3"
+            parts = message_text.split()
+            if len(parts) == 2 and parts[0] == "ACTUALIZAR":
+                target_id = parts[1]
+                if target_id == PICO_ID:
+                    print(f"¡Comando de actualización recibido para este Pico (ID: {PICO_ID})!")
+                    send_telegram_message(f"Pico {PICO_ID}: OK, iniciando proceso de actualización desde GitHub...")
+                    # Llamar a la función que realiza la actualización
+                    perform_ota_update()
+                else:
+                    print(f"Comando de actualización ignorado (dirigido a ID: {target_id}, yo soy ID: {PICO_ID})")
+
+    except Exception as e:
+        print(f"No se pudo comprobar Telegram o comando inválido: {e}")
+
+def perform_ota_update():
+    """Usa la librería OTA para descargar e instalar actualizaciones desde GitHub."""
+    try:
+        ota_updater = OTAUpdater(GITHUB_REPO_URL, OTA_FILES)
+        update_available = ota_updater.download_and_install_update_if_available()
+        
+        if update_available:
+            send_telegram_message(f"Pico {PICO_ID}: Actualización completada. Reiniciando ahora.")
+            print("Actualización descargada. Reiniciando en 3 segundos...")
+            time.sleep(3)
+            machine.reset()
+        else:
+            send_telegram_message(f"Pico {PICO_ID}: Ya estoy en la última versión. No se requiere actualización.")
+            print("Ya en la última versión.")
+            
+    except Exception as e:
+        send_telegram_message(f"Pico {PICO_ID}: ¡ERROR durante la actualización OTA! {e}")
+        print(f"Error OTA: {e}")
+
+# --- MODIFICADO: La función on_message ahora maneja múltiples temas ---
+def on_message(topic, msg):
+    """Se ejecuta cuando llega un mensaje de la Pi 5 en CUALQUIER tema suscrito."""
+    # Decodificamos el tema y el mensaje para poder compararlos
+    topic_str = topic.decode()
+    comando = msg.decode()
+    
+    print(f"Comando '{comando}' recibido en el tema '{topic_str}'")
+
+    # Lógica para el tema de RIEGO
+    if topic_str == TOPIC_RIEGO:
+        if comando == "REGAR":
+            print("Activando riego por 5 segundos...")
+            # ... (código para activar el relé de la bomba) ...
+            print("Riego finalizado.")
+    
+    # NUEVA LÓGICA: para el tema de ADMIN
+    elif topic_str == TOPIC_ADMIN:
+        if comando == "ACTUALIZAR":
+            print("¡Comando de reinicio recibido! Reiniciando en 3 segundos...")
+            send_telegram_message(f"Pico {PICO_ID}: Recibido. Reiniciando ahora.")
+            time.sleep(3)
+            machine.reset() # ¡La magia ocurre aquí!
 
 def calculate_stats(measurements):
     """Calcula la media y la desviación estándar de una lista de números."""
@@ -126,7 +213,7 @@ def get_stable_reading():
         print(f"Intento de medición {attempt + 1}/{MAX_TRIES}...")
         measurements = []
         for _ in range(25):
-            measurements.append(ads.read(channel=ADS_CHANNEL))
+            measurements.append(ads.read(ADS_CHANNEL))
             time.sleep_ms(250)
             
         mean, std_dev = calculate_stats(measurements)
@@ -161,11 +248,18 @@ check_or_request_config()
 # 2. Conexión a la red
 connect_wifi()
 mqtt_client = MQTTClient(f"pico_planta_{PICO_ID}", MQTT_BROKER)
+mqtt_client.set_callback(on_message)
 mqtt_client.connect()
 print("Conectado a MQTT.")
 
+# Nos suscribimos a AMBOS temas: el de riego y el nuevo de administración
+mqtt_client.subscribe(TOPIC_RIEGO)
+mqtt_client.subscribe(TOPIC_ADMIN)
+print(f"Suscrito a los temas: {TOPIC_RIEGO} y {TOPIC_ADMIN}")
+
 # 3. Bucle infinito de medición y envío
 while True:
+    # 3.1: Medir y enviar datos a la Pi 5 vía MQTT
     print(f"\n--- Iniciando nuevo ciclo de medición ({time.ticks_ms()}) ---")
     
     valor_crudo = get_stable_reading()
@@ -202,6 +296,10 @@ while True:
             print(f"Error enviando a MQTT: {e}. Reconectando...")
             mqtt_client.connect() # Intento simple de reconexión
 
-    # Esperar para el siguiente ciclo
+    # 3.2: NUEVO - Comprobar si hay comandos de actualización en Telegram
+    print("Comprobando comandos de actualización en Telegram...")
+    get_telegram_updates_and_check_command()
+    
+    # 3.3: Esperar para el siguiente ciclo
     print(f"Ciclo completado. Durmiendo por {MAIN_LOOP_INTERVAL_S} segundos.")
     time.sleep(MAIN_LOOP_INTERVAL_S)
