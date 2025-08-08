@@ -3,7 +3,7 @@ import time
 
 # Asigna el pin del LED integrado a una variable.
 # En la Raspberry Pi Pico, el LED integrado está conectado al pin GPIO 25.
-led = Pin(25, Pin.OUT)
+led = Pin("LED", Pin.OUT)
 
 # Bucle infinito para alternar el estado del LED.
 # Presiona Ctrl+C en tu terminal para detener el script.
