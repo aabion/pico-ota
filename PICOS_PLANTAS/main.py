@@ -17,7 +17,7 @@ WIFI_SSID = "AMBE"
 WIFI_PASS = "Ganuza210966"
 MQTT_BROKER = "192.168.68.107" # IP de la Raspberry Pi 5
 CONFIG_FILE = "config.json"
-MAIN_LOOP_INTERVAL_S = 30 # 300 seg.=5 minutos / pongo 60 seg=1 minu
+MAIN_LOOP_INTERVAL_S = 15 # 300 seg.=5 minutos / pongo 60 seg=1 minu
 
 # --- NUEVO: Temas MQTT ---
 TOPIC_DATA = f"planta/{PICO_ID}/data"
@@ -31,10 +31,10 @@ TELEGRAM_CHAT_ID = "1413941022"
 # --- NUEVO: CONFIGURACIÓN OTA DESDE GITHUB ---
 # Reemplaza 'tu-usuario' y 'tu-repositorio' con los tuyos
 #GITHUB_REPO_URL = "https://api.github.com/repos/tu-usuario/tu-repositorio/contents/"
-GITHUB_REPO_URL = "https://github.com/aabion/pico-ota"
+GITHUB_REPO_URL = "https://github.com/aabion/pico-ota/"
 
 # Lista de ficheros que el actualizador OTA debe gestionar
-OTA_FILES = ['main.py', 'ads1x15.py'] 
+OTA_FILES = ['main.py'] 
 
 # --- CONFIGURACIÓN DEL SENSOR ADS1115 ---
 I2C_BUS = 0
@@ -70,32 +70,37 @@ def get_telegram_updates_and_check_command():
             if message_text == "ACTUALIZAR":
                 print(f"¡Comando de actualización recibido para todos los Picos! (ID: {PICO_ID})")
                 send_telegram_message(f"Pico {PICO_ID}: OK, iniciando proceso de actualización desde GitHub...")
-                perform_ota_update()
+                print("Actualización descargada. Reiniciando en 3 segundos...")
+                time.sleep(3)
+                machine.reset()
+                #perform_ota_update()
     except Exception as e:
         print(f"No se pudo comprobar Telegram o comando inválido: {e}")
         
 def perform_ota_update():
     """Usa la librería OTA para descargar e instalar actualizaciones desde GitHub."""
-    try:
+    #try:
         # Pasa una cadena vacía para github_src_dir si los archivos están en la raíz.
         # El argumento main_dir='main' le dice dónde guardar la nueva versión,
         # lo que es útil si el script principal está en la raíz.
-        ota_updater = OTAUpdater(GITHUB_REPO_URL, github_src_dir='main')
-        
-        update_available = ota_updater.install_update_if_available()
-        
-        if update_available:
-            send_telegram_message(f"Pico {PICO_ID}: Actualización de main.py completada. Reiniciando ahora.")
-            print("Actualización descargada. Reiniciando en 3 segundos...")
-            time.sleep(3)
-            machine.reset()
-        else:
-            send_telegram_message(f"Pico {PICO_ID}: Ya estoy en la última versión. No se requiere actualización.")
-            print("Ya en la última versión.")
-            
+    ota_updater = OTAUpdater(GITHUB_REPO_URL, github_src_dir='PICOS_PLANTAS')
+    
+    update_available = ota_updater.install_update_if_available()
+    #print(update_available)
+    
+    if update_available:
+        send_telegram_message(f"Pico {PICO_ID}: Actualización de main.py completada. Reiniciando ahora.")
+        print("Actualización descargada. Reiniciando en 3 segundos...")
+        time.sleep(3)
+        machine.reset()
+    else:
+        send_telegram_message(f"Pico {PICO_ID}: Ya estoy en la última versión. No se requiere actualización.")
+        print("Ya en la última versión.")
+    '''        
     except Exception as e:
         send_telegram_message(f"Pico {PICO_ID}: ¡ERROR durante la actualización OTA! {e}")
         print(f"Error OTA: {e}")
+    '''
 # --- MODIFICADO: La función on_message ahora maneja múltiples temas ---
 def on_message(topic, msg):
     """Se ejecuta cuando llega un mensaje de la Pi 5 en CUALQUIER tema suscrito."""
