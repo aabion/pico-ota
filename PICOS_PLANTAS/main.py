@@ -11,9 +11,9 @@ while True:
     # Enciende el LED.
     led.value(1) 
     print("LED encendido")
-    time.sleep(0.5)  # Espera 0.5 segundos.
+    time.sleep(2)  # Espera 0.5 segundos.
 
     # Apaga el LED.
     led.value(0)
     print("LED apagado")
-    time.sleep(0.5)  # Espera 0.5 segundos.
+    time.sleep(1)  # Espera 0.5 segundos.
